@@ -1,7 +1,8 @@
 <?php
 session_start();
-include 'db.php';
+require 'config.php'; // include your PDO config file
 
+// Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit();
@@ -10,25 +11,43 @@ if (!isset($_SESSION['user_id'])) {
 $user_id = $_SESSION['user_id'];
 $username = $_SESSION['username'];
 
-// Pagination settings
+// Pagination setup
 $limit = 5;
-$page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
+$page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
 $offset = ($page - 1) * $limit;
 
-// Search handling
-$search = isset($_GET['search']) ? mysqli_real_escape_string($conn, $_GET['search']) : '';
-$search_condition = $search ? "AND (title LIKE '%$search%' OR content LIKE '%$search%')" : '';
+// Search setup
+$search = isset($_GET['search']) ? trim($_GET['search']) : '';
+$search_condition = '';
+$search_param = '';
 
-// Count total posts for pagination
-$count_sql = "SELECT COUNT(*) FROM posts WHERE user_id = $user_id $search_condition";
-$total_posts = mysqli_fetch_row(mysqli_query($conn, $count_sql))[0];
+if ($search !== '') {
+    $search_condition = "AND (title LIKE :search OR content LIKE :search)";
+    $search_param = '%' . $search . '%';
+}
+
+// Count total posts
+$count_sql = "SELECT COUNT(*) FROM posts WHERE user_id = :user_id $search_condition";
+$count_stmt = $pdo->prepare($count_sql);
+$count_stmt->bindValue(':user_id', $user_id, PDO::PARAM_INT);
+if ($search !== '') {
+    $count_stmt->bindValue(':search', $search_param, PDO::PARAM_STR);
+}
+$count_stmt->execute();
+$total_posts = $count_stmt->fetchColumn();
 $total_pages = ceil($total_posts / $limit);
 
-// Fetch posts
-$post_sql = "SELECT * FROM posts WHERE user_id = $user_id $search_condition ORDER BY created_at DESC LIMIT $limit OFFSET $offset";
-$result = mysqli_query($conn, $post_sql);
+// Fetch paginated posts
+$post_sql = "SELECT * FROM posts WHERE user_id = :user_id $search_condition 
+             ORDER BY created_at DESC LIMIT $limit OFFSET $offset";
+$post_stmt = $pdo->prepare($post_sql);
+$post_stmt->bindValue(':user_id', $user_id, PDO::PARAM_INT);
+if ($search !== '') {
+    $post_stmt->bindValue(':search', $search_param, PDO::PARAM_STR);
+}
+$post_stmt->execute();
+$posts = $post_stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
-
 <!DOCTYPE html>
 <html>
 <head>
@@ -44,48 +63,48 @@ $result = mysqli_query($conn, $post_sql);
 <body>
 
 <h2>Welcome, <?php echo htmlspecialchars($username); ?>!</h2>
-<p>You are logged in with ID: <?php echo $user_id; ?></p>
+<p>You are logged in with ID: <?php echo htmlspecialchars($user_id); ?></p>
 
-<a href="add_post.php">Add New Post</a> | 
+<a href="add_post.php">Add New Post</a> |
 <a href="logout.php">Logout</a>
 
 <!-- Search Form -->
 <form method="GET" action="dashboard.php">
-    <input type="text" name="search" placeholder="Search posts..." value="<?php echo htmlspecialchars($search); ?>" required>
+    <input type="text" name="search" placeholder="Search posts..." value="<?php echo htmlspecialchars($search); ?>">
     <input type="submit" value="Search">
 </form>
 
 <h3>Your Blog Posts</h3>
 
-<?php
-if (mysqli_num_rows($result) > 0) {
-    while ($row = mysqli_fetch_assoc($result)) {
-        echo "<div class='post'>";
-        echo "<strong>" . htmlspecialchars($row['title']) . "</strong><br>";
-        echo "<p>" . nl2br(htmlspecialchars($row['content'])) . "</p>";
-        echo "<small>Posted on: " . $row['created_at'] . "</small><br>";
-        echo "<a href='edit_post.php?id=" . $row['id'] . "'>Edit</a> | ";
-        echo "<a href='delete_post.php?id=" . $row['id'] . "' onclick=\"return confirm('Are you sure you want to delete this post?')\">Delete</a>";
-        echo "</div>";
-    }
+<?php if (!empty($posts)): ?>
+    <?php foreach ($posts as $post): ?>
+        <div class="post">
+            <strong><?php echo htmlspecialchars($post['title']); ?></strong><br>
+            <p><?php echo nl2br(htmlspecialchars($post['content'])); ?></p>
+            <small>Posted on: <?php echo htmlspecialchars($post['created_at']); ?></small><br>
+            <a href="edit_post.php?id=<?php echo $post['id']; ?>">Edit</a> |
+            <a href="delete_post.php?id=<?php echo $post['id']; ?>" onclick="return confirm('Are you sure you want to delete this post?')">Delete</a>
+        </div>
+    <?php endforeach; ?>
 
-    // Pagination links
-    echo "<div class='pagination'>";
-    echo "Pages: ";
-    for ($i = 1; $i <= $total_pages; $i++) {
-        $link = "dashboard.php?page=$i";
-        if ($search) $link .= "&search=" . urlencode($search);
-        if ($i == $page) {
-            echo "<strong>$i</strong>";
-        } else {
-            echo "<a href='$link'>$i</a>";
-        }
-    }
-    echo "</div>";
-} else {
-    echo "<p>No posts found.</p>";
-}
-?>
+    <!-- Pagination -->
+    <div class="pagination">Pages:
+        <?php for ($i = 1; $i <= $total_pages; $i++): ?>
+            <?php
+            $link = "dashboard.php?page=$i";
+            if ($search) $link .= "&search=" . urlencode($search);
+            ?>
+            <?php if ($i == $page): ?>
+                <strong><?php echo $i; ?></strong>
+            <?php else: ?>
+                <a href="<?php echo $link; ?>"><?php echo $i; ?></a>
+            <?php endif; ?>
+        <?php endfor; ?>
+    </div>
+<?php else: ?>
+    <p>No posts found.</p>
+<?php endif; ?>
 
 </body>
 </html>
+

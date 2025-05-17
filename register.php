@@ -1,3 +1,50 @@
+<?php
+session_start();
+include 'db.php';
+
+$message = "";
+$message_color = "#dc3545"; // default red for errors
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $username = trim($_POST['username']);
+    $email = trim($_POST['email']);
+    $password = $_POST['password'];
+
+    // Check if the username or email already exists
+    $query = "SELECT * FROM users WHERE username = ? OR email = ?";
+    if ($stmt = mysqli_prepare($conn, $query)) {
+        mysqli_stmt_bind_param($stmt, 'ss', $username, $email);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+
+        if (mysqli_num_rows($result) > 0) {
+            $message = "❌ Username or Email already exists.";
+        } else {
+            // Hash the password before storing it
+            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+
+            // Insert the new user into the database
+            $insert_query = "INSERT INTO users (username, email, password) VALUES (?, ?, ?)";
+            if ($insert_stmt = mysqli_prepare($conn, $insert_query)) {
+                mysqli_stmt_bind_param($insert_stmt, 'sss', $username, $email, $hashed_password);
+                if (mysqli_stmt_execute($insert_stmt)) {
+                    $message_color = "#28a745"; // green
+                    $message = "✅ Registration successful! You can now <a href='login.php'>Login</a>.";
+                } else {
+                    $message = "❌ Error: Unable to register. Please try again.";
+                }
+                mysqli_stmt_close($insert_stmt);
+            } else {
+                $message = "❌ Error preparing registration query.";
+            }
+        }
+        mysqli_stmt_close($stmt);
+    } else {
+        $message = "❌ Database error: Unable to process request.";
+    }
+}
+?>
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -72,7 +119,16 @@
             text-align: center;
             font-weight: bold;
             margin-bottom: 15px;
-            color: #dc3545;
+            color: <?php echo $message_color; ?>;
+        }
+
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
         }
     </style>
 </head>
